@@ -12,11 +12,10 @@ This is a pytorch implementation of the following paper [[arXiv]](https://arxiv.
 ```
 Please read [LICENCE.md](LICENCE.md) before reading or using the files.
 
+
 ## Prerequisites
 - Please install `python>=3.10`, `numpy`, `scipy`, `torch`, `torchvision`, `scikit_learn`, and `matplotlib`
 - Please also see `requirements.txt`
-- Note that we use the nvidia pytorch docker image (`23.12-py3`)
-  -  https://catalog.ngc.nvidia.com/orgs/nvidia/containers/pytorch/tags
 
 
 ## Datasets
@@ -25,7 +24,7 @@ All datasets will be downloaded when first used.
 
 ## Usage
 
-### for image datasets
+### for MNIST, FashionMNIST, SVHN and CIFAR10
 ```
 usage: main.py [-h] [--dataset DATASET] [--normal_class NORMAL_CLASS]
                [--unseen_anomaly UNSEEN_ANOMALY] [--algorithm ALGORITHM]
@@ -41,10 +40,13 @@ usage: main.py [-h] [--dataset DATASET] [--normal_class NORMAL_CLASS]
 - You can choose the `normal_class` from 0 to 9
 - You can choose the `unseen_anomaly` from 0 to 9
 - You can choose the `algorithm` from following algorithms:
+  - `IF`: Isolation Forest
   - `AE`: Autoencoder
   - `DeepSVDD`: DeepSVDD
+  - `LOE`: Latent Outlier Exposure
   - `ABC`: Autoencoding Binary Classifier
   - `DeepSAD`: Deep Semi-Supervised Anomaly Detection
+  - `SOEL`: Semi-supervised Outlier Exposure with a Limited labeling budget
   - `PU`: PU Learning Classifier
   - `PUAE`: Our approach with AE
   - `PUSVDD`: Our approach with DeepSVDD
@@ -61,8 +63,10 @@ usage: toy.py [-h] [--algorithm ALGORITHM] [--alpha ALPHA] [--n_epoch N_EPOCH]
 - You can choose the `algorithm` from following algorithms:
   - `AE`: Autoencoder
   - `DeepSVDD`: DeepSVDD
+  - `LOE`: Latent Outlier Exposure
   - `ABC`: Autoencoding Binary Classifier
   - `DeepSAD`: Deep Semi-Supervised Anomaly Detection
+  - `SOEL`: Semi-supervised Outlier Exposure with a Limited labeling budget
   - `PU`: PU Learning Classifier
   - `PUAE`: Our approach with AE
   - `PUSVDD`: Our approach with DeepSVDD
@@ -73,5 +77,5 @@ usage: toy.py [-h] [--algorithm ALGORITHM] [--alpha ALPHA] [--n_epoch N_EPOCH]
 ## Example
 MNIST experiment (normal: 1 / unseen: 0) with our approach:
 ```
-python main.py --dataset MNIST --normal_class 1 --unseen_anomaly 0 --algorithm PUAE
+python main.py --dataset MNIST --normal_class 1 --unseen_anomaly 0 --algorithm PUSVDD
 ```
