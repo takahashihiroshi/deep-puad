@@ -9,6 +9,16 @@ import torch
 import dataloaders
 from models import detectors, losses, trainers, utils
 
+
+class Config(argparse.Namespace):
+    algorithm: str
+    alpha: float
+    n_epoch: int
+    learning_rate: float
+    batch_size: int
+    seed: int
+
+
 if __name__ == "__main__":
     # Parser
     parser = argparse.ArgumentParser()
@@ -18,26 +28,24 @@ if __name__ == "__main__":
     parser.add_argument("--learning_rate", type=float, default=1e-4)
     parser.add_argument("--batch_size", type=int, default=128)
     parser.add_argument("--seed", type=int, default=42)
-    args = parser.parse_args()
-    print(args)
+    config = parser.parse_args(namespace=Config())
 
-    algorithm = args.algorithm
-    alpha = args.alpha if algorithm in ["PU", "PUAE", "PUSVDD"] else 0.0
-    n_epoch = args.n_epoch
-    learning_rate = args.learning_rate
-    batch_size = args.batch_size
-    seed = args.seed
+    if config.algorithm not in ["PU", "PUAE", "PUSVDD", "LOE", "SOEL"]:
+        config.alpha = 0.0
+
+    print("Setting:", config)
 
     # Key
-    key = f"toy_{algorithm}_{alpha}_{n_epoch}_{learning_rate}_{batch_size}_{seed}"
+    key = "_".join([str(v) for v in vars(config).values()])
 
     # Seed
-    torch.manual_seed(seed)
-    random.seed(seed)
-    np.random.seed(seed)
+    torch.manual_seed(config.seed)
+    random.seed(config.seed)
+    np.random.seed(config.seed)
 
     # Device
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print("Device:", device)
 
     # Dataset
     n_normal = 900
@@ -45,21 +53,21 @@ if __name__ == "__main__":
     n_labeled_anomaly = 20
 
     train_loader = dataloaders.make_toy_data(
-        batch_size=batch_size,
+        batch_size=config.batch_size,
         n_normal=n_normal,
         n_unlabeled_anomaly=n_unlabeled_anomaly,
         n_labeled_anomaly=n_labeled_anomaly,
         is_train=True,
     )
     valid_loader = dataloaders.make_toy_data(
-        batch_size=batch_size,
+        batch_size=config.batch_size,
         n_normal=n_normal,
         n_unlabeled_anomaly=n_unlabeled_anomaly,
         n_labeled_anomaly=n_labeled_anomaly,
         is_train=True,
     )
     test_loader = dataloaders.make_toy_data(
-        batch_size=batch_size,
+        batch_size=config.batch_size,
         n_normal=n_normal,
         n_unlabeled_anomaly=n_unlabeled_anomaly,
         n_labeled_anomaly=n_labeled_anomaly,
@@ -67,40 +75,24 @@ if __name__ == "__main__":
     )
 
     # Model
-    model: detectors.Detector
-    if algorithm in ["AE", "ABC", "PUAE"]:
-        model = detectors.DAE(n_in=2, n_latent=2, n_h=500, epsilon=0.1)
-    elif algorithm in ["DeepSVDD", "DeepSAD", "PUSVDD"]:
-        model = detectors.DeepSVDD(n_in=2, n_latent=2, n_h=500)
-    else:
-        # nnPU
-        model = detectors.MLP(n_in=2, n_h=500)
+    n_in = 2
+    n_latent = 2
+    n_h = 500
 
+    model = detectors.load_dense_model(algorithm=config.algorithm, n_in=n_in, n_latent=n_latent, n_h=n_h, epsilon=0.1)
     model = model.to(device)
-    print(type(model))
+    print("Model:", type(model))
 
-    criterion: losses.Loss
-    match algorithm:
-        case "AE" | "DeepSVDD":
-            criterion = losses.AELoss()
-        case "ABC":
-            criterion = losses.ABCLoss()
-        case "DeepSAD":
-            criterion = losses.DeepSADLoss()
-        case "PUAE":
-            criterion = losses.PUAELoss(alpha=alpha)
-        case "PUSVDD":
-            criterion = losses.PUSVDDLoss(alpha=alpha)
-        case _:  # nnPU
-            criterion = losses.PULoss(alpha=alpha)
+    # Criterion
+    criterion = losses.load(algorithm=config.algorithm, alpha=config.alpha)
 
     # Train
     for path in ["checkpoints", "results", "images"]:
         os.makedirs(path, exist_ok=True)
 
-    if isinstance(model, detectors.DeepSVDD):
-        # Pre-Training as Autoencoder
-        print("Pre-Training:")
+    if isinstance(model, detectors.PreTrainableSVDD):
+        # Pre-Training DeepSVDD model as Autoencoder
+        print("Pre-Training DeepSVDD:")
         pre_trainer = trainers.Trainer(device)
         pre_trainer.fit(
             model=model,
@@ -108,10 +100,14 @@ if __name__ == "__main__":
             train_loader=train_loader,
             valid_loader=valid_loader,
             checkpoint=f"checkpoints/{key}.pt",
-            n_epoch=n_epoch,
-            learning_rate=learning_rate,
+            n_epoch=config.n_epoch,
+            learning_rate=config.learning_rate,
             weight_decay=1e-3,
         )
+
+    if isinstance(model, detectors.DeepSVDD):
+        # Set center for DeepSVDD model
+        print("Set center for DeepSVDD:")
         utils.set_center(model=model, train_loader=train_loader, device=device, eps=0.1)
 
     print("Training:")
@@ -122,8 +118,8 @@ if __name__ == "__main__":
         train_loader=train_loader,
         valid_loader=valid_loader,
         checkpoint=f"checkpoints/{key}.pt",
-        n_epoch=n_epoch,
-        learning_rate=learning_rate,
+        n_epoch=config.n_epoch,
+        learning_rate=config.learning_rate,
         weight_decay=1e-3,
     )
 
@@ -135,6 +131,8 @@ if __name__ == "__main__":
         train_loss=trainer.train_losses,
         valid_loss=trainer.valid_losses,
         test_score=test_score,
+        seen_anomaly_score=0,
+        unseen_anomaly_score=0,
     )
 
     # Save and Plot Results
@@ -220,7 +218,7 @@ if __name__ == "__main__":
         label="Unseen Anomaly",
     )
 
-    if algorithm == "PU":
+    if config.algorithm == "PU":
         plt.legend(
             loc="upper left",
             handletextpad=0.15,
