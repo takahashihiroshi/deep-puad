@@ -22,9 +22,7 @@ class Trainer:
         learning_rate: float = 1e-4,
         weight_decay: float = 1e-3,
     ):
-        optimizer = torch.optim.Adam(
-            model.parameters(), lr=learning_rate, weight_decay=weight_decay
-        )
+        optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
         for epoch in range(n_epoch):
             # training step
             model.train()
@@ -69,4 +67,4 @@ class Trainer:
 
             print(prompt)
 
-        model.load_state_dict(torch.load(checkpoint))
+        model.load_state_dict(torch.load(checkpoint, weights_only=True))
