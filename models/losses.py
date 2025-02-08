@@ -9,27 +9,60 @@ class Loss(nn.Module):
 
 class AELoss(Loss):
     def forward(self, output: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-        return torch.mean((1 - target) * output)
+        return torch.mean(output[target == 0])
+
+
+class DeepSVDDLoss(Loss):
+    def forward(self, output: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        return torch.mean(output[target == 0] ** 2)
 
 
 class ABCLoss(Loss):
     def forward(self, output: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-        y_positive = -torch.log1p(-torch.exp(-output))
+        y_positive = -torch.log(1 - torch.exp(-output) + 1e-6)
         y_unlabeled = output
         return torch.mean((1 - target) * y_unlabeled + target * y_positive)
 
 
 class DeepSADLoss(Loss):
     def forward(self, output: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-        y_positive = 1 / (output + 1e-6)
-        y_unlabeled = output
+        y_positive = 1 / (output**2 + 1e-6)
+        y_unlabeled = output**2
         return torch.mean((1 - target) * y_unlabeled + target * y_positive)
 
 
-class PUBaseLoss(Loss):
+class LOELoss(Loss):
     def __init__(self, alpha: float):
         super().__init__()
         self.alpha = alpha
+
+    def forward(self, output: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        y_anomaly = 1 / (output[target == 0] ** 2 + 1e-6)
+        y_normal = output[target == 0] ** 2
+
+        score = y_normal - y_anomaly
+
+        _, normal_index = torch.topk(score, int(score.shape[0] * (1 - self.alpha)), largest=False, sorted=False)
+        _, anomaly_index = torch.topk(score, int(score.shape[0] * self.alpha), largest=True, sorted=False)
+        loss = torch.cat([y_normal[normal_index], y_anomaly[anomaly_index]], 0)
+        return torch.mean(loss)
+
+
+class SOELLoss(LOELoss):
+    def forward(self, output: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        loss = super().forward(output, target)
+        n_positive = torch.sum(target)
+        if n_positive > 1:
+            loss += torch.mean(1 / (output[target == 1] ** 2 + 1e-6))
+
+        return loss  # type: ignore
+
+
+class PULoss(Loss):
+    def __init__(self, alpha: float, use_abs: bool):
+        super().__init__()
+        self.alpha = alpha
+        self.use_abs = use_abs
 
     def forward(self, output: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
         positive = target
@@ -42,10 +75,13 @@ class PUBaseLoss(Loss):
         y_unlabeled = self.unlabeled_loss(output)
 
         positive_risk = torch.sum(self.alpha * positive * y_positive / n_positive)
-        negative_risk = torch.sum(
-            (unlabeled / n_unlabeled - self.alpha * positive / n_positive) * y_unlabeled
-        )
+        negative_risk = torch.sum((unlabeled / n_unlabeled - self.alpha * positive / n_positive) * y_unlabeled)
 
+        # use abs for PUAE
+        if self.use_abs:
+            return positive_risk + torch.abs(negative_risk)
+
+        # use max for nnPU
         if negative_risk < 0:
             return -1 * negative_risk
         else:
@@ -58,7 +94,10 @@ class PUBaseLoss(Loss):
         raise NotImplementedError
 
 
-class PULoss(PUBaseLoss):
+class NonNegativePULoss(PULoss):
+    def __init__(self, alpha: float):
+        super().__init__(alpha=alpha, use_abs=False)
+
     def positive_loss(self, x: torch.Tensor) -> torch.Tensor:
         return torch.sigmoid(-x)
 
@@ -66,23 +105,44 @@ class PULoss(PUBaseLoss):
         return torch.sigmoid(x)
 
 
-class PUAELoss(PUBaseLoss):
+class PUAELoss(PULoss):
     def __init__(self, alpha: float):
-        super().__init__(alpha=alpha)
-
-    def positive_loss(self, x: torch.Tensor) -> torch.Tensor:
-        return -torch.log1p(-torch.exp(-x))
-
-    def unlabeled_loss(self, x: torch.Tensor) -> torch.Tensor:
-        return x
-
-
-class PUSVDDLoss(PUBaseLoss):
-    def __init__(self, alpha: float):
-        super().__init__(alpha=alpha)
+        super().__init__(alpha=alpha, use_abs=True)
 
     def positive_loss(self, x: torch.Tensor) -> torch.Tensor:
         return -torch.log(1 - torch.exp(-x) + 1e-6)
 
     def unlabeled_loss(self, x: torch.Tensor) -> torch.Tensor:
         return x
+
+
+class PUSVDDLoss(PULoss):
+    def __init__(self, alpha: float):
+        super().__init__(alpha=alpha, use_abs=True)
+
+    def positive_loss(self, x: torch.Tensor) -> torch.Tensor:
+        return 1 / (x**2 + 1e-6)  # type: ignore
+
+    def unlabeled_loss(self, x: torch.Tensor) -> torch.Tensor:
+        return x**2  # type: ignore
+
+
+def load(algorithm: str, alpha: float) -> Loss:
+    if algorithm == "AE":
+        return AELoss()
+    if algorithm == "DeepSVDD":
+        return DeepSVDDLoss()
+    elif algorithm == "ABC":
+        return ABCLoss()
+    elif algorithm == "DeepSAD":
+        return DeepSADLoss()
+    elif algorithm == "PUAE":
+        return PUAELoss(alpha=alpha)
+    elif algorithm == "PUSVDD":
+        return PUSVDDLoss(alpha=alpha)
+    elif algorithm == "LOE":
+        return LOELoss(alpha=alpha)
+    elif algorithm == "SOEL":
+        return SOELLoss(alpha=alpha)
+    else:  # nnPU
+        return NonNegativePULoss(alpha=alpha)
