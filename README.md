@@ -7,7 +7,8 @@ This is a pytorch implementation of the following paper [[arXiv]](https://arxiv.
       year={2024},
       eprint={2405.18929},
       archivePrefix={arXiv},
-      primaryClass={stat.ML}
+      primaryClass={stat.ML},
+      url={https://arxiv.org/abs/2405.18929}, 
 }
 ```
 Please read [LICENCE.md](LICENCE.md) before reading or using the files.
