@@ -16,19 +16,21 @@ class Result:
     train_loss: list[float]
     valid_loss: list[float]
     test_score: float
+    seen_anomaly_score: float
+    unseen_anomaly_score: float
 
 
-def compute_auc(
-    model: detectors.Detector, test_loader: DataLoader, device: torch.device
-) -> float:
+def compute_auc(model: detectors.Detector, test_loader: DataLoader, device: torch.device) -> float:
     y_score = []
     y_true = []
-    for batch in test_loader:
-        x = batch[0].to(device)
-        y = batch[1].to(device)
-        s = model.estimate(x)
-        y_score.extend(s.cpu().tolist())
-        y_true.extend(y.cpu().tolist())
+    model.eval()
+    with torch.no_grad():
+        for batch in test_loader:
+            x = batch[0].to(device)
+            y = batch[1].to(device)
+            s = model.estimate(x)
+            y_score.extend(s.cpu().tolist())
+            y_true.extend(y.cpu().tolist())
 
     return roc_auc_score(y_true=y_true, y_score=y_score)  # type: ignore
 
@@ -98,18 +100,19 @@ def set_center(
     eps: float = 0.1,
 ) -> None:
     N_train = len(train_loader.dataset)  # type: ignore
-    c = torch.zeros(model.n_latent, device=device)
+    n_latent = 128 if isinstance(model, detectors.ConvolutionalSVDD) else model.n_latent
+    c = torch.zeros(n_latent, device=device)
 
     # compute center
     model.eval()
     with torch.no_grad():
         for batch in train_loader:
             x = batch[0].to(device)
-            output = model.encoder(x)
+            output = model.encode(x)
             c += torch.sum(output, dim=0) / N_train
 
     c[(abs(c) < eps) & (c < 0)] = -eps
     c[(abs(c) < eps) & (c > 0)] = eps
 
     # set center
-    model.c = c
+    model.set_center(c)
